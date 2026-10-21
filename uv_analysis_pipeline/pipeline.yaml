@@ -1,0 +1,13 @@
+meta:
+  extract_upstream: true
+
+tasks:
+  - source: tasks/load.py
+    name: load
+    product:
+      nb: products/nbs/load.ipynb
+      data: products/data/01_raw_combined.csv
+    params:
+      config: "{{load_config}}"
+
+  
