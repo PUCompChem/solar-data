@@ -5,9 +5,12 @@ tasks:
   - source: tasks/load.py
     name: load
     product:
-      nb: products/nbs/load.ipynb
-      data: products/data/01_raw_combined.csv
+      nb: "{{folder_output}}/nbs/load.ipynb"
+      data: "{{folder_output}}/data/01_raw_combined.csv"
     params:
+      folder_input: "{{folder_input}}"
       config: "{{load_config}}"
+
+
 
   
