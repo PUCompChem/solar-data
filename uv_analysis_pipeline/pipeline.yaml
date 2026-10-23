@@ -6,7 +6,7 @@ tasks:
     name: load
     product:
       nb: "{{folder_output}}/nbs/load.ipynb"
-      data: "{{folder_output}}/data/01_raw_combined.csv"
+      data: "{{folder_output}}/initial_data/01_raw_combined.csv"
     params:
       folder_input: "{{folder_input}}"
       config: "{{load_config}}"
