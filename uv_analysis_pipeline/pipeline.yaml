@@ -17,14 +17,10 @@ tasks:
     product:
       nb: "{{folder_output}}/nbs/clean.ipynb"
       data: "{{folder_output}}/data/02_clean.csv"
+      report: "{{folder_output}}/data/02_clean_report.csv"
     params:
-      value_column: "{{value_column}}"
-      sentinel_values: "{{sentinel_values}}"
-      min_valid: "{{min_valid}}"
-      max_valid: "{{max_valid}}"
-      hampel_window: "{{hampel_window}}"
-      hampel_sigmas: "{{hampel_sigmas}}"
+      channel: "{{value_column}}"
+      config: "{{clean_config}}"
       cadence: "{{cadence}}"
-      max_gap_fill: "{{max_gap_fill}}"
 
   
