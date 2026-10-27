@@ -1,5 +1,5 @@
 meta:
-  extract_upstream: true
+  extract_upstream: false
 
 tasks:
   - source: tasks/load.py
@@ -11,6 +11,20 @@ tasks:
       folder_input: "{{folder_input}}"
       config: "{{load_config}}"
 
-
+  - source: tasks/clean.py
+    name: clean
+    upstream: [load]
+    product:
+      nb: "{{folder_output}}/nbs/clean.ipynb"
+      data: "{{folder_output}}/data/02_clean.csv"
+    params:
+      value_column: "{{value_column}}"
+      sentinel_values: "{{sentinel_values}}"
+      min_valid: "{{min_valid}}"
+      max_valid: "{{max_valid}}"
+      hampel_window: "{{hampel_window}}"
+      hampel_sigmas: "{{hampel_sigmas}}"
+      cadence: "{{cadence}}"
+      max_gap_fill: "{{max_gap_fill}}"
 
   
