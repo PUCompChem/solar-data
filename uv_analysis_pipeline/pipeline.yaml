@@ -23,4 +23,13 @@ tasks:
       config: "{{clean_config}}"
       cadence: "{{cadence}}"
 
-  
+  - source: tasks/plots.py
+    name: plots
+    upstream: [load, clean]
+    product:
+      nb: "{{folder_output}}/nbs/plots.ipynb"
+      html: "{{folder_output}}/plots/03_uv_plots.html"
+    params:
+      channel: "{{value_column}}"
+      sentinel_values: "{{clean_config.sentinel_values}}"
+      config: "{{plots_config}}"  
