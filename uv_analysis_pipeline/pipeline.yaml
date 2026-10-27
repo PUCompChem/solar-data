@@ -32,4 +32,14 @@ tasks:
     params:
       channel: "{{value_column}}"
       sentinel_values: "{{clean_config.sentinel_values}}"
-      config: "{{plots_config}}"  
+      config: "{{plots_config}}"
+
+  - source: tasks/plots3d.py
+    name: plots3d
+    upstream: [load]
+    product:
+      nb: "{{folder_output}}/nbs/plots3d.ipynb"
+      html: "{{folder_output}}/plots/04_uv_surfaces.html"
+    params:
+      sentinel_values: "{{clean_config.sentinel_values}}"
+      config: "{{plots3d_config}}"
