@@ -27,6 +27,7 @@ columns = config["columns"]
 time_columns = config["time_columns"]
 time_format = config["time_format"]
 timezone = config.get("timezone", "UTC")
+keep_raw_time = config.get("keep_raw_time", False)
 
 # --- validate the configuration up front
 if len(set(columns)) != len(columns):
@@ -63,6 +64,15 @@ def parse_time(df):
                 .dt.tz_convert("UTC").dt.tz_localize(None))
     return ts
 
+def raw_time(df):
+    """Original time value as in the file: a number for unix formats, else the joined text."""
+    parts = [df[c].str.strip() for c in time_columns]
+    if unix:
+        return pd.to_numeric(parts[0], errors="coerce")
+    joined = parts[0]
+    for p in parts[1:]:
+        joined = joined + " " + p
+    return joined
 
 df = pd.read_csv(path, sep=delimiter, engine="python", dtype=str, on_bad_lines="skip",
                  comment=comment_char or None, header=0 if has_header else None)
@@ -82,6 +92,9 @@ if not (pd.Timestamp("2000-01-01") <= ts.min() and ts.max() <= pd.Timestamp("210
     raise ValueError(f"{path.name}: times span {ts.min()} .. {ts.max()}; check time_format in env.yaml")
 
 data = pd.DataFrame({"timestamp": ts.values})
+if keep_raw_time:
+    data["time_raw"] = raw_time(df).values
+
 n_bad_vals = 0
 for c in channels:
     raw = df[c].str.strip()
