@@ -37,6 +37,22 @@ colorscale = config.get("colorscale", "Viridis")
 plot_height = int(config.get("plot_height", 680))
 aspect = config.get("aspect", [1.4, 2.0, 0.8])
 tick_hours = float(config.get("x_tick_hours", 3))
+opacity = float(config.get("opacity", 1.0))
+if not 0 < opacity <= 1:
+    raise ValueError(f"opacity must be in (0, 1] (got {opacity})")
+
+# Value-dependent opacity: None, a Plotly preset name, or a FLAT list of (position, opacity) pairs,
+# e.g. [0, 0.0, 0.05, 0.25, 1, 1]  = pairs (0 -> 0.0), (0.05 -> 0.25), (1 -> 1);  position 0 = lowest value, 1 = highest
+opacityscale = config.get("opacityscale")
+if isinstance(opacityscale, (list, tuple)):
+    flat = [x for item in opacityscale for x in (item if isinstance(item, (list, tuple)) else [item])]
+    if len(flat) < 4 or len(flat) % 2:
+        raise ValueError("opacityscale needs at least two (position, opacity) pairs, e.g. [0, 0.1, 1, 1]")
+    opacityscale = [[float(flat[i]), float(flat[i + 1])] for i in range(0, len(flat), 2)]
+    if opacityscale[0][0] != 0 or opacityscale[-1][0] != 1:
+        raise ValueError("opacityscale must start at position 0 and end at position 1")
+elif opacityscale is not None and opacityscale not in ("min", "max", "extremes", "uniform"):
+    raise ValueError(f"opacityscale must be null, min, max, extremes, uniform or a list of pairs (got {opacityscale!r})")
 
 if aggregate not in ("mean", "median", "max", "min"):
     raise ValueError(f"aggregate must be mean, median, max or min (got {aggregate!r})")
@@ -107,6 +123,7 @@ ids, blocks = [], []
 for c, z in surfaces.items():
     fig = go.Figure(go.Surface(
         x=x_labels, y=y_dates, z=z, colorscale=colorscale, connectgaps=False,
+        opacity=opacity, **({"opacityscale": opacityscale} if opacityscale else {}),
         lighting=dict(ambient=0.85, diffuse=0.45, specular=0.03, roughness=0.9, fresnel=0.05),  # soft: no speckle on noise
         colorbar=dict(title=dict(text=c), thickness=14, len=0.7),
         hovertemplate="date %{y|%Y-%m-%d}<br>time %{x} UTC<br>" + f"{c} ({aggregate}) " + "%{z:.4g}<extra></extra>"))
@@ -156,6 +173,9 @@ h2{font-size:16px;margin:10px 0 0}
 <div id="bar">
   <label><input type="checkbox" id="sync" checked> Keep the cameras of all plots in sync</label>
   <button id="reset">Reset all views</button>
+  <label>Days from <input type="date" id="d0" min="__DMIN__" max="__DMAX__" value="__DMIN__"> to <input type="date" id="d1" min="__DMIN__" max="__DMAX__" value="__DMAX__"></label>
+  <button id="full">Full record</button>
+  <label>Opacity <input type="range" id="opa" min="0.1" max="1" step="0.05" value="__OPACITY__"> <span id="opav"></span></label>
   <span>Jump to: __NAV__</span>
   <span class="meta">drag = rotate &middot; wheel = zoom &middot; right-drag or Shift+drag = pan &middot; hover = values &middot; double-click = reset one plot</span>
 </div>
@@ -172,6 +192,23 @@ __FIGS__
     gds.filter((o) => o !== gd && !same(camOf(o), cam)).forEach((o) => Plotly.relayout(o, { 'scene.camera': cam }));
   }));
   document.getElementById('reset').onclick = () => gds.forEach((gd) => Plotly.relayout(gd, { 'scene.camera': CAM0 }));
+  const d0 = document.getElementById('d0'), d1 = document.getElementById('d1'), DMIN = '__DMIN__', DMAX = '__DMAX__';
+  const applySpan = () => {
+    let a = d0.value || DMIN, b = d1.value || DMAX;
+    if (a > b) { [a, b] = [b, a]; d0.value = a; d1.value = b; }
+    const full = a === DMIN && b === DMAX;
+    gds.forEach((gd) => Plotly.relayout(gd, full ? { 'scene.yaxis.autorange': true } : { 'scene.yaxis.range': [a, b] }));
+  };
+  d0.onchange = d1.onchange = applySpan;
+  document.getElementById('full').onclick = () => { d0.value = DMIN; d1.value = DMAX; applySpan(); };
+  const opa = document.getElementById('opa'), opav = document.getElementById('opav');
+  let timer = 0;
+  opav.textContent = (+opa.value).toFixed(2);
+  opa.oninput = () => {
+    opav.textContent = (+opa.value).toFixed(2);
+    clearTimeout(timer);                                  // small debounce: redrawing four WebGL surfaces takes a moment
+    timer = setTimeout(() => gds.forEach((gd) => Plotly.restyle(gd, { opacity: +opa.value })), 80);
+  };
 })();
 </script>
 </body>
@@ -183,6 +220,7 @@ meta = (f"{len(raw):,} rows  &middot;  {days[0]:{fmt}} &rarr; {days[-1]:{fmt}} U
         f"bins of {x_bin} ({aggregate} per bin)")
 nav = " &middot; ".join(f'<a href="#surf_{i}">{html.escape(c)}</a>' for i, c in enumerate(surfaces))
 page = (TEMPLATE.replace("__TITLE__", html.escape(title)).replace("__META__", meta).replace("__NAV__", nav)
+        .replace("__OPACITY__", str(opacity)).replace("__DMIN__", y_dates[0]).replace("__DMAX__", y_dates[-1])
         .replace("__FIGS__", "\n".join(blocks)).replace("__IDS__", json.dumps(ids)).replace("__CAMERA__", json.dumps(CAMERA)))
 # Plotly itself goes in a <script> in the head, before any figure
 page = page.replace("</head>", "<script>" + get_plotlyjs() + "</script>\n</head>", 1)
