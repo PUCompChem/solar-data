@@ -43,3 +43,15 @@ tasks:
     params:
       sentinel_values: "{{clean_config.sentinel_values}}"
       config: "{{plots3d_config}}"
+
+  - source: tasks/features.py
+    name: features
+    upstream: ["{{data_source}}"]
+    product:
+      nb: "{{folder_output}}/nbs/features.ipynb"
+      data: "{{folder_output}}/data/05_daily_features.csv"
+    params:
+      config: "{{features_config}}"
+      sentinel_values: "{{clean_config.sentinel_values}}"
+      cadence: "{{cadence}}"
+      min_daily_coverage: "{{min_daily_coverage}}"
