@@ -64,3 +64,15 @@ tasks:
       html: "{{folder_output}}/plots/05_features_plots.html"
     params:
       config: "{{plots_features_config}}"
+      
+  - source: tasks/analyze.py
+    name: analyze
+    upstream: ["{{data_source}}", features]
+    product:
+      nb: "{{folder_output}}/nbs/analyze.ipynb"
+      summary: "{{folder_output}}/data/06_summary.json"
+    params:
+      value_column: "{{value_column}}"
+      value_units: "{{value_units}}"
+      period_min_days: "{{period_min_days}}"
+      period_max_days: "{{period_max_days}}"
