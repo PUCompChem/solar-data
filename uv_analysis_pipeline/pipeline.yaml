@@ -55,3 +55,12 @@ tasks:
       sentinel_values: "{{clean_config.sentinel_values}}"
       cadence: "{{cadence}}"
       min_daily_coverage: "{{min_daily_coverage}}"
+
+  - source: tasks/plots_features.py
+    name: plots_features
+    upstream: [features]
+    product:
+      nb: "{{folder_output}}/nbs/plots_features.ipynb"
+      html: "{{folder_output}}/plots/05_features_plots.html"
+    params:
+      config: "{{plots_features_config}}"
