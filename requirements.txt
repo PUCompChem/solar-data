@@ -1,0 +1,10 @@
+ploomber
+jupytext
+ipykernel
+nbconvert
+papermill
+pandas
+numpy
+scipy
+matplotlib
+plotly
