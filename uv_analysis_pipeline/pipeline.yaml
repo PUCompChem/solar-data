@@ -64,7 +64,7 @@ tasks:
       html: "{{folder_output}}/plots/05_features_plots.html"
     params:
       config: "{{plots_features_config}}"
-      
+
   - source: tasks/analyze.py
     name: analyze
     upstream: ["{{data_source}}", features]
@@ -76,3 +76,13 @@ tasks:
       value_units: "{{value_units}}"
       period_min_days: "{{period_min_days}}"
       period_max_days: "{{period_max_days}}"
+  
+  - source: tasks/parabola.py
+    name: parabola
+    upstream: ["{{data_source}}"]
+    product:
+      nb: "{{folder_output}}/nbs/parabola.ipynb"
+      data: "{{folder_output}}/data/07_daily_parabola.csv"
+    params:
+      config: "{{parabola_config}}"
+      sentinel_values: "{{clean_config.sentinel_values}}"
