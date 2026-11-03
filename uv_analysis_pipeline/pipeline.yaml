@@ -83,6 +83,7 @@ tasks:
     product:
       nb: "{{folder_output}}/nbs/parabola.ipynb"
       data: "{{folder_output}}/data/07_daily_parabola.csv"
+      summary: "{{folder_output}}/data/07_parabola_summary.csv"
     params:
       config: "{{parabola_config}}"
       sentinel_values: "{{clean_config.sentinel_values}}"

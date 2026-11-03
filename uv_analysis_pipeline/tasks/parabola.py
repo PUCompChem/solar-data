@@ -28,7 +28,10 @@
 # - `ok`
 # `perfect` (True/False) marks the `ok` days that are almost cloud-free and fit almost exactly:
 # `clear_fraction` >= `perfect_min_clear_fraction`, `r2` >= `perfect_min_r2` and rmse / y_max <= `perfect_max_rel_rmse`.
-# Output: one wide CSV, one row per day, columns `<channel>_<field>`. Settings: `parabola_config` in env.yaml.
+# Output: `data`: one wide CSV, one row per day, columns `<channel>_<field>`.
+#         `summary`: one row per channel and quality class (perfect, ok, poor_fit, cloudy, ...): number and share of days
+#         and mean / median / std / min / max of the main parameters. The classes do not overlap: `ok` here means
+#         "ok but not perfect". Settings: `parabola_config` in env.yaml.
 
 # %% tags=["parameters"]
 upstream = None          # set in pipeline.yaml from `data_source`: "clean" or "load" (raw)
@@ -191,3 +194,28 @@ wide.columns = [f"{c}_{f}" for c, f in wide.columns]
 wide.index.name = "date"
 wide.to_csv(product["data"])
 print(f"Wrote {wide.shape[0]} days x {wide.shape[1]} columns")
+
+# %% [markdown]
+# ## Summary by quality
+# One row per channel and quality class. `perfect` = status ok and the `perfect_*` criteria; `ok` = the remaining ok days;
+# the other classes are the statuses. t_max and y_max exist only for `perfect` and `ok` days; for the other classes use
+# `peak_obs` (observed smoothed peak). Statistics skip empty values.
+
+# %%
+QUALITY = ["perfect", "ok", "poor_fit", "cloudy", "not_concave", "peak_outside_window",
+           "gap_in_window", "too_few_points", "low_activity", "no_data"]
+STAT_FIELDS = ["t_max", "y_max", "a", "r2", "clear_fraction", "peak_obs"]
+rows = []
+for c, d in per_channel.items():
+    quality = d["status"].where(~d["perfect"], "perfect")
+    for name in QUALITY + sorted(set(quality) - set(QUALITY)):      # any unforeseen label still gets a row
+        sub = d[quality == name]
+        row = {"channel": c, "quality": name, "n_days": len(sub), "pct_days": round(100 * len(sub) / len(d), 1)}
+        for f in STAT_FIELDS:
+            x = sub[f]
+            row.update({f"{f}_mean": x.mean(), f"{f}_median": x.median(), f"{f}_std": x.std(),
+                        f"{f}_min": x.min(), f"{f}_max": x.max()})
+        rows.append(row)
+summary = pd.DataFrame(rows)
+summary.to_csv(product["summary"], index=False)
+summary[["channel", "quality", "n_days", "pct_days", "t_max_mean", "t_max_std", "y_max_mean", "r2_mean", "clear_fraction_mean"]]
