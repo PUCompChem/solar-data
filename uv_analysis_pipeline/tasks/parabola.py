@@ -21,17 +21,19 @@
 #                        (rolling 31-day 90th percentile) or below `min_peak`: heavy clouds / very low UV
 # - `too_few_points`     fewer than 10 points in the top part, or a fitted window shorter than `min_fit_hours`
 # - `gap_in_window`      missing data (a hole longer than `max_gap_hours` between samples) inside the fitted window
-# - `cloudy`            fewer than `min_clear_fraction` of the points are cloud-free: too little to trust the envelope
 # - `not_concave`        a >= 0, the parabola has no maximum
 # - `peak_outside_window`  the maximum lies outside the fitted data (extrapolation)
-# - `poor_fit`           R^2 < `min_r2` (partly cloudy day, the parabola does not describe the data)
+# - `very_cloudy`       goodness of fit R^2 < `min_r2`: clouds make the signal deviate strongly from a parabola
+#                        (the geometric/data problems above are excluded first, so a bad fit here means clouds;
+#                        `ok` days may also have some clouds, mostly short dips that the fit ignores)
 # - `ok`
-# `perfect` (True/False) marks the `ok` days that are almost cloud-free and fit almost exactly:
+# `quality` summarises a day: `perfect` | `lightly_cloudy` (the other `ok` days: a good fit, possibly with some short
+# cloud dips) | `very_cloudy` | the remaining problem statuses. `perfect` (True/False) marks the `ok` days that are
+# almost cloud-free and fit almost exactly:
 # `clear_fraction` >= `perfect_min_clear_fraction`, `r2` >= `perfect_min_r2` and rmse / y_max <= `perfect_max_rel_rmse`.
 # Output: `data`: one wide CSV, one row per day, columns `<channel>_<field>`.
-#         `summary`: one row per channel and quality class (perfect, ok, poor_fit, cloudy, ...): number and share of days
-#         and mean / median / std / min / max of the main parameters. The classes do not overlap: `ok` here means
-#         "ok but not perfect". Settings: `parabola_config` in env.yaml.
+#         `summary`: one row per channel and quality class (perfect, lightly_cloudy, very_cloudy, ...): number and share of days
+#         and mean / median / std / min / max of the main parameters. The classes do not overlap. Settings: `parabola_config` in env.yaml.
 
 # %% tags=["parameters"]
 upstream = None          # set in pipeline.yaml from `data_source`: "clean" or "load" (raw)
@@ -53,7 +55,6 @@ min_samples = int(config.get("min_samples", 30))
 min_fit_hours = float(config.get("min_fit_hours", 2.0))
 max_gap_hours = float(config.get("max_gap_hours", 0.5))
 min_r2 = float(config.get("min_r2", 0.9))
-min_clear_fraction = float(config.get("min_clear_fraction", 0.5))
 low_peak_frac = float(config.get("low_peak_frac", 0.3))
 min_peak = config.get("min_peak")
 # "perfect" parabolas: status ok AND all of these (stricter than the status checks)
@@ -130,8 +131,6 @@ def fit_day(t, y):
         return res, "gap_in_window"
     if tt.max() - tt.min() < min_fit_hours:
         return res, "too_few_points"
-    if clear_fraction < min_clear_fraction:
-        return res, "cloudy"
     if A >= 0:
         return res, "not_concave"
     t_max = t0 - B / (2 * A)
@@ -140,7 +139,7 @@ def fit_day(t, y):
     if not (tt.min() <= t_max <= tt.max()):
         return res, "peak_outside_window"
     if not (res["r2"] >= min_r2):
-        return res, "poor_fit"
+        return res, "very_cloudy"
     return res, "ok"
 
 # %% [markdown]
@@ -177,6 +176,8 @@ def fit_channel(series):
     if perfect_max_rel_rmse is not None:
         perfect &= (out["rmse"] / out["y_max"]) <= float(perfect_max_rel_rmse)
     out["perfect"] = perfect
+    # quality label: perfect > lightly_cloudy (the other ok days: fit fine, maybe some short cloud dips) > the problem statuses
+    out["quality"] = out["status"].mask(out["status"] == "ok", "lightly_cloudy").mask(perfect, "perfect")
     return out.drop(columns="amp")
 
 per_channel = {c: fit_channel(df[c]) for c in channels}
@@ -197,19 +198,21 @@ print(f"Wrote {wide.shape[0]} days x {wide.shape[1]} columns")
 
 # %% [markdown]
 # ## Summary by quality
-# One row per channel and quality class. `perfect` = status ok and the `perfect_*` criteria; `ok` = the remaining ok days;
-# the other classes are the statuses. t_max and y_max exist only for `perfect` and `ok` days; for the other classes use
-# `peak_obs` (observed smoothed peak). Statistics skip empty values.
+# One row per channel and quality class. `perfect` = status ok and the `perfect_*` criteria; `lightly_cloudy` = the remaining ok days;
+# the other classes are the statuses. t_max and y_max exist only for `perfect` and `lightly_cloudy` days; for the other classes use
+# `peak_obs` (observed smoothed peak). Statistics skip empty values. Classes with no day are left out.
 
 # %%
-QUALITY = ["perfect", "ok", "poor_fit", "cloudy", "not_concave", "peak_outside_window",
+QUALITY = ["perfect", "lightly_cloudy", "very_cloudy", "not_concave", "peak_outside_window",
            "gap_in_window", "too_few_points", "low_activity", "no_data"]
 STAT_FIELDS = ["t_max", "y_max", "a", "r2", "clear_fraction", "peak_obs"]
 rows = []
 for c, d in per_channel.items():
-    quality = d["status"].where(~d["perfect"], "perfect")
+    quality = d["quality"]
     for name in QUALITY + sorted(set(quality) - set(QUALITY)):      # any unforeseen label still gets a row
         sub = d[quality == name]
+        if sub.empty:
+            continue                                                 # classes that do not occur get no row
         row = {"channel": c, "quality": name, "n_days": len(sub), "pct_days": round(100 * len(sub) / len(d), 1)}
         for f in STAT_FIELDS:
             x = sub[f]
