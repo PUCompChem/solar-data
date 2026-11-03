@@ -7,7 +7,8 @@
 #
 # Only the top part of the daily curve is fitted (where the smoothed signal is above
 # `fit_fraction` of its way from the day's baseline to its peak). A cosine-like profile is well described by
-# a parabola there, but not over the whole day.
+# a parabola there, but not over the whole day. Option `window_half_hours` (default null) replaces this by a FIXED
+# interval, peak time +- this many hours (e.g. 3); `fit_fraction` is then ignored.
 #
 # Clouds only LOWER the UV. The fit therefore follows the UPPER ENVELOPE of the data (the cloud-free curve): points far
 # below the parabola (`reject_sigma` x the noise above it) are dropped and the parabola is refitted. On a day with broken
@@ -31,6 +32,9 @@
 # cloud dips) | `very_cloudy` | the remaining problem statuses. `perfect` (True/False) marks the `ok` days that are
 # almost cloud-free and fit almost exactly:
 # `clear_fraction` >= `perfect_min_clear_fraction`, `r2` >= `perfect_min_r2` and rmse / y_max <= `perfect_max_rel_rmse`.
+# Dips (clouds): samples of the whole window that lie more than `reject_sigma` noise units below the parabola; samples closer
+# than `dip_merge_minutes` form one dip. Per day: `n_dips`, `n_dip_points`, `dip_hours`, `longest_dip_hours`, `dip_fraction`
+# (share of the window), `max_dip_depth_pct`; `n_selected` / `n_excluded` are the points before / removed by the rejection.
 # Output: `data`: one wide CSV, one row per day, columns `<channel>_<field>`.
 #         `summary`: one row per channel and quality class (perfect, lightly_cloudy, very_cloudy, ...): number and share of days
 #         and mean / median / std / min / max of the main parameters. The classes do not overlap. Settings: `parabola_config` in env.yaml.
@@ -50,6 +54,8 @@ exclude = config.get("exclude_channels") or []
 mask_sentinels = bool(config.get("mask_sentinels", True))
 smooth_window = int(config.get("smooth_window", 11))
 fit_fraction = float(config.get("fit_fraction", 0.5))
+window_half_hours = config.get("window_half_hours")           # fixed window peak +- this many hours; null = use fit_fraction
+dip_merge_hours = float(config.get("dip_merge_minutes", 5)) / 60   # dip samples closer than this belong to ONE dip (episode)
 reject_sigma = config.get("reject_sigma", 3.0)
 min_samples = int(config.get("min_samples", 30))
 min_fit_hours = float(config.get("min_fit_hours", 2.0))
@@ -63,6 +69,8 @@ perfect_min_r2 = float(config.get("perfect_min_r2", 0.99))
 perfect_max_rel_rmse = config.get("perfect_max_rel_rmse", 0.02)    # rmse / y_max; null = not used
 if not 0 <= fit_fraction < 1:
     raise ValueError(f"fit_fraction must be in [0, 1) (got {fit_fraction})")
+if window_half_hours is not None and float(window_half_hours) <= 0:
+    raise ValueError(f"window_half_hours must be > 0 or null (got {window_half_hours})")
 if smooth_window < 1:
     raise ValueError(f"smooth_window must be >= 1 (got {smooth_window})")
 
@@ -82,9 +90,33 @@ print(f"Channels: {channels}" + (f"  (excluded: {list(exclude)})" if exclude els
 # ## Fit one day
 
 # %%
+def dip_stats(t, y, coef, t0, lo, hi, kept_resid):
+    """Dips = samples of the whole window [lo, hi] (not only the selected ones) that lie more than `reject_sigma` noise units
+    BELOW the fitted parabola. Dip samples closer than `dip_merge_minutes` form one dip (episode)."""
+    m = (t >= lo) & (t <= hi)
+    tw, yw = t[m], y[m]
+    curve = np.polyval(coef, tw - t0)
+    pos = kept_resid[kept_resid > 0]
+    sig = float(np.sqrt(np.mean(pos ** 2))) if len(pos) >= 5 else float(np.sqrt(np.mean(kept_resid ** 2)))
+    below = (curve - yw) > float(reject_sigma or 3.0) * sig
+    out = dict(n_dips=0, n_dip_points=int(below.sum()), dip_hours=0.0, longest_dip_hours=0.0,
+               dip_fraction=float(below.sum() / len(tw)) if len(tw) else np.nan, max_dip_depth_pct=0.0)
+    if below.any():
+        td = tw[below]
+        episode = np.concatenate([[0], np.cumsum(np.diff(td) > dip_merge_hours)])
+        step = float(np.median(np.diff(tw))) if len(tw) > 1 else 0.0           # one sample = this many hours
+        dur = np.array([td[episode == i].max() - td[episode == i].min() + step for i in range(episode[-1] + 1)])
+        ok = curve > 0
+        depth = np.where(ok, (curve - yw) / np.where(ok, curve, 1.0), 0.0)
+        out.update(n_dips=int(len(dur)), dip_hours=float(dur.sum()), longest_dip_hours=float(dur.max()),
+                   max_dip_depth_pct=float(100 * depth.max()))
+    return out
+
 def fit_day(t, y):
     """t: hours of day, y: values (finite). Returns (dict of results, status or None)."""
     res = dict(n_points=0, clear_fraction=np.nan, window_start=np.nan, window_end=np.nan, a=np.nan, b=np.nan, c=np.nan,
+               n_selected=0, n_excluded=0, n_dips=0, n_dip_points=0, dip_hours=np.nan, longest_dip_hours=np.nan,
+               dip_fraction=np.nan, max_dip_depth_pct=np.nan,
                r2=np.nan, rmse=np.nan, t_max=np.nan, y_max=np.nan, peak_obs=np.nan, t_peak_obs=np.nan, amp=np.nan)
     if len(t) < min_samples:
         return res, "no_data"
@@ -94,11 +126,15 @@ def fit_day(t, y):
     res.update(peak_obs=float(s[k]), t_peak_obs=float(t[k]), amp=float(s[k] - base))
     if res["amp"] <= 0:
         return res, None                              # judged later as low_activity
-    sel = s >= base + fit_fraction * res["amp"]
+    if window_half_hours is not None:
+        sel = np.abs(t - t[k]) <= float(window_half_hours)           # fixed interval around the peak
+    else:
+        sel = s >= base + fit_fraction * res["amp"]
     tt, yy = t[sel], y[sel]
     if len(tt) < 10:
         return res, "too_few_points"
-    in_win = t[(t >= tt.min()) & (t <= tt.max())]     # all samples inside the window, not only the selected ones,
+    win_lo, win_hi = tt.min(), tt.max()
+    in_win = t[(t >= win_lo) & (t <= win_hi)]         # all samples inside the window, not only the selected ones,
     max_gap = float(np.max(np.diff(np.sort(in_win)))) if len(in_win) > 1 else 0.0   # so cloud dips are not counted as gaps
     t0 = tt.mean()
     x = tt - t0
@@ -123,6 +159,8 @@ def fit_day(t, y):
     x, yy, tt = x[keep], yy[keep], tt[keep]
     A, B, C = coef                                    # in x = t - t0
     fit = np.polyval(coef, x)
+    res.update(dip_stats(t, y, coef, t0, win_lo, win_hi, yy - fit))
+    res.update(n_selected=int(n_selected), n_excluded=int(n_selected - keep.sum()))
     ss_res, ss_tot = float(np.sum((yy - fit) ** 2)), float(np.sum((yy - yy.mean()) ** 2))
     res.update(n_points=int(len(tt)), clear_fraction=clear_fraction, window_start=float(tt.min()), window_end=float(tt.max()),
                a=float(A), b=float(B - 2 * A * t0), c=float(C - B * t0 + A * t0 ** 2),   # coefficients in absolute t
@@ -200,12 +238,14 @@ print(f"Wrote {wide.shape[0]} days x {wide.shape[1]} columns")
 # ## Summary by quality
 # One row per channel and quality class. `perfect` = status ok and the `perfect_*` criteria; `lightly_cloudy` = the remaining ok days;
 # the other classes are the statuses. t_max and y_max exist only for `perfect` and `lightly_cloudy` days; for the other classes use
-# `peak_obs` (observed smoothed peak). Statistics skip empty values. Classes with no day are left out.
+# `peak_obs` (observed smoothed peak). The dip statistics (number of dips, points and hours in dips, longest dip, share of
+# the window, depth) are given for every class that has a fit. Statistics skip empty values. Classes with no day are left out.
 
 # %%
 QUALITY = ["perfect", "lightly_cloudy", "very_cloudy", "not_concave", "peak_outside_window",
            "gap_in_window", "too_few_points", "low_activity", "no_data"]
-STAT_FIELDS = ["t_max", "y_max", "a", "r2", "clear_fraction", "peak_obs"]
+STAT_FIELDS = ["t_max", "y_max", "a", "r2", "clear_fraction", "peak_obs",
+               "n_dips", "n_dip_points", "dip_hours", "longest_dip_hours", "dip_fraction", "max_dip_depth_pct"]
 rows = []
 for c, d in per_channel.items():
     quality = d["quality"]
