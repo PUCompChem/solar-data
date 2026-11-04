@@ -87,3 +87,15 @@ tasks:
     params:
       config: "{{parabola_config}}"
       sentinel_values: "{{clean_config.sentinel_values}}"
+
+  - source: tasks/plots_parabola.py
+    name: plots_parabola
+    upstream: [parabola, load]
+    product:
+      nb: "{{folder_output}}/nbs/plots_parabola.ipynb"
+      grid: "{{folder_output}}/plots/07_parabola_grid.html"
+      overlay: "{{folder_output}}/plots/07_parabola_overlay.html"
+      timeline: "{{folder_output}}/plots/07_parabola_timeline.html"
+    params:
+      config: "{{plots_parabola_config}}"
+      sentinel_values: "{{clean_config.sentinel_values}}"
