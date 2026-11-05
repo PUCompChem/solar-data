@@ -99,3 +99,12 @@ tasks:
     params:
       config: "{{plots_parabola_config}}"
       sentinel_values: "{{clean_config.sentinel_values}}"
+
+  - source: tasks/plots_max.py
+    name: plots_max
+    upstream: [features, parabola]
+    product:
+      nb: "{{folder_output}}/nbs/plots_max.ipynb"
+      html: "{{folder_output}}/plots/07_max_points.html"
+    params:
+      config: "{{plots_max_config}}"
